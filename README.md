@@ -21,6 +21,7 @@ https://github.com/berniwal/swin-transformer-pytorch
 2. Swin Transformer Block
 - W-MSA
 - SW-MSA
+
 ![model](./figure/img_3.png)
 
 
