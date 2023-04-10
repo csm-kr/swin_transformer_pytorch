@@ -1,5 +1,4 @@
 import math
-
 import torch
 import torch.nn as nn
 
@@ -41,41 +40,6 @@ class MLP(nn.Module):
         x = self.fc2(x)
         x = self.drop2(x)
         return x
-
-
-# class W_MSA(nn.Module):
-#     def __init__(self, dim, heads, head_dim, window_size):
-#         super().__init__()
-#         inner_dim = head_dim * heads
-#
-#         self.heads = heads
-#         self.scale = head_dim ** -0.5
-#         self.window_size = window_size
-#         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-#         # self.relative_indices = get_relative_distances(window_size) + window_size - 1
-#         self.pos_embedding = nn.Parameter(torch.randn(2 * window_size - 1, 2 * window_size - 1))
-#         self.to_out = nn.Linear(inner_dim, dim)
-#
-#     def forward(self, x):
-#         b, n_h, n_w, _, h = *x.shape, self.heads
-#
-#         qkv = self.to_qkv(x).chunk(3, dim=-1)
-#         nw_h = n_h // self.window_size
-#         nw_w = n_w // self.window_size
-#
-#         q, k, v = map(
-#             lambda t: rearrange(t, 'b (nw_h w_h) (nw_w w_w) (h d) -> b h (nw_h nw_w) (w_h w_w) d',
-#                                 h=h, w_h=self.window_size, w_w=self.window_size), qkv)
-#
-#         dots = einsum('b h w i d, b h w j d -> b h w i j', q, k) * self.scale
-#         dots += self.pos_embedding[self.relative_indices[:, :, 0], self.relative_indices[:, :, 1]]
-#         attn = dots.softmax(dim=-1)
-#
-#         out = einsum('b h w i j, b h w j d -> b h w i d', attn, v)
-#         out = rearrange(out, 'b h (nw_h nw_w) (w_h w_w) d -> b (nw_h w_h) (nw_w w_w) (h d)',
-#                         h=h, w_h=self.window_size, w_w=self.window_size, nw_h=nw_h, nw_w=nw_w)
-#         out = self.to_out(out)
-#         return out
 
 
 class W_MSA(nn.Module):
@@ -311,10 +275,14 @@ class SwinTransformer(nn.Module):
         self.head = nn.Linear(dim[3], num_classes)
 
     def forward(self, x):
-        x = self.features(x)  # B, 49, 768
-        x = self.norm(x)      # B, 49, 768
-        x = x.mean(dim=1)     # B, 768
-        x = self.head(x)      # B, 1000
+        """
+        :param x: [B, 3, 224, 224]
+        :return:
+        """
+        x = self.features(x)  # [B, 49, 768]
+        x = self.norm(x)      # [B, 49, 768]
+        x = x.mean(dim=1)     # [B, 768]
+        x = self.head(x)      # [B, 1000]
         return x
 
 
@@ -339,5 +307,7 @@ class PatchMerging(nn.Module):
 
 if __name__ == '__main__':
     img = torch.randn([2, 3, 224, 224])
-    model = SwinTransformer()
+    model = SwinTransformer()  # 28249588(git) vs 28288354(ms) / 37755 / vs 28261000(my) (507 + 37248)
+    print("SwinTransformer : ", sum(p.numel() for p in model.parameters() if p.requires_grad))
     print(model(img).size())
+
