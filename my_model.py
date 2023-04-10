@@ -113,7 +113,7 @@ class W_MSA(nn.Module):
         x = x.view(B * h_ * w_, ws * ws, C)           # [B' = B x 8 x 8],   -> [B'         49, 96]
 
         # ------------------------------ attention ------------------------------
-        B_, N, C = x.shape                                                              # [B_, 49, 96]
+        B_, N, C = x.shape                            # [B_, 49, 96]
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
 
@@ -203,11 +203,11 @@ class SW_MSA(nn.Module):
 
         # [B, 3136, C]
         # ----------- efficient batch computation for shifted configuration -----------
-        x = x.view(B, h, w, C)  # [B, H, W, C]
-        x = torch.roll(x, shifts=(-3, -3), dims=(1, 2))
-        x = x.view(B, h_, ws, w_, ws, C)  # [0, 1, 2, 3, 4, 5 ] -> [0, 1, 3, 2, 4, 5 ] - idx
-        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()  # [B, 8, 7, 8, 7, 96] -> [B, 8, 8, 7, 7, 96]
-        x = x.view(B * h_ * w_, ws * ws, C)  # [B' = B x 8 x 8],   -> [B'         49, 96]
+        x = x.view(B, h, w, C)                             # [B, H, W, C]
+        x = torch.roll(x, shifts=(-3, -3), dims=(1, 2))    # [B, H, W, C]
+        x = x.view(B, h_, ws, w_, ws, C)                   # [0, 1, 2, 3, 4, 5 ] -> [0, 1, 3, 2, 4, 5 ] - idx
+        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()       # [B, 8, 7, 8, 7, 96] -> [B, 8, 8, 7, 7, 96]
+        x = x.view(B * h_ * w_, ws * ws, C)                # [B' = B x 8 x 8],   -> [B'         49, 96]
 
         # ------------------------------ attention ------------------------------
         B_, N, C = x.shape  # [B_, 49, 96]
@@ -226,14 +226,14 @@ class SW_MSA(nn.Module):
 
         x = (attn @ v).transpose(1, 2).reshape(B_, N, -1)
         x = self.proj(x)
-        x = self.proj_drop(x)  # [B_, 49, 96]
+        x = self.proj_drop(x)                              # [B_, 49, 96]
 
         # ---------- make multi-batch tensor original batch tensor ----------v
-        x = x.view(B, h_, w_, ws, ws, C)  # [B, 8, 8, 7, 7, 96]
-        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()  # [B, 8, 7, 8, 7, 96]
-        x = x.view(B, h, w, -1)  # (roll)  [B, 56, 56, 96]
-        x = torch.roll(x, shifts=(3, 3), dims=(1, 2))
-        x = x.view(B, h * w, C)  # [B, 56, 56, 96]
+        x = x.view(B, h_, w_, ws, ws, C)                   # [B, 8, 8, 7, 7, 96]
+        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()       # [B, 8, 7, 8, 7, 96]
+        x = x.view(B, h, w, -1)                    # (roll)  [B, 56, 56, 96]
+        x = torch.roll(x, shifts=(3, 3), dims=(1, 2))      # [B, 56, 56, 96]
+        x = x.view(B, h * w, C)                            # [B, 3136, 96]
         return x
 
 
@@ -260,8 +260,7 @@ class SwinBlock(nn.Module):
         # for sw-msa
         self.norm2_1 = norm_layer(dim)
         self.norm2_2 = norm_layer(dim)
-        self.sw_msa = SW_MSA(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
-                             input_resolution=input_resolution)
+        self.sw_msa = SW_MSA(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, input_resolution=input_resolution)
         self.mlp2 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
 
     def forward(self, x):
@@ -275,27 +274,47 @@ class SwinBlock(nn.Module):
 
 class SwinTransformer(nn.Module):
     def __init__(self,
-                 depths=(2, 2, 6, 2), num_heads=(3, 6, 12, 24),
-                 resolutions=(56, 28, 14, 7), dim=(96, 192, 384, 768)):
+                 dim=(96, 192, 384, 768),
+                 depths=(2, 2, 6, 2),
+                 num_heads=(3, 6, 12, 24),
+                 resolutions=(56, 28, 14, 7),
+                 num_classes=1000):
         super().__init__()
-        self.patch_partition = PatchPartition()
 
-        # 2 depth
-        self.swin_block = SwinBlock(96, num_heads[0], input_resolution=(resolutions[0], resolutions[0]))
-        self.patch_merging = PatchMerging(96, 192, (resolutions[0], resolutions[0]))
+        self.features = nn.Sequential(
+            # patch partition
+            PatchPartition(),
 
-        # 2 depth
-        self.swin_block2 = SwinBlock(192, num_heads[1], input_resolution=(resolutions[1], resolutions[1]))
-        self.patch_merging2 = PatchMerging(192, 384, (resolutions[1], resolutions[1]))
+            # swin block 1
+            nn.Sequential(*[SwinBlock(96, num_heads[0], input_resolution=(resolutions[0], resolutions[0])) for _ in
+                            range(depths[0] // 2)]),
+            # patch merging 1
+            PatchMerging(dim[0], dim[1], (resolutions[0], resolutions[0])),
+
+            # swin block 2
+            nn.Sequential(*[SwinBlock(dim[1], num_heads[1], input_resolution=(resolutions[1], resolutions[1])) for _ in
+                            range(depths[1] // 2)]),
+            # patch merging 2
+            PatchMerging(dim[1], dim[2], (resolutions[1], resolutions[1])),
+
+            # swin block 3
+            nn.Sequential(*[SwinBlock(dim[2], num_heads[2], input_resolution=(resolutions[2], resolutions[2])) for _ in
+                            range(depths[2] // 2)]),
+            # patch merging 3
+            PatchMerging(dim[2], dim[3], (resolutions[2], resolutions[2])),
+
+            # swin block 4
+            nn.Sequential(*[SwinBlock(dim[3], num_heads[3], input_resolution=(resolutions[3], resolutions[3])) for _ in
+                            range(depths[3] // 2)]),
+        )
+        self.norm = nn.LayerNorm(dim[3])
+        self.head = nn.Linear(dim[3], num_classes)
 
     def forward(self, x):
-        x = self.patch_partition(x)       # [2, 3136, 96]
-        x = self.swin_block(x)
-        x = self.patch_merging(x)
-
-        x = self.swin_block2(x)
-        x = self.patch_merging2(x)
-
+        x = self.features(x)  # B, 49, 768
+        x = self.norm(x)      # B, 49, 768
+        x = x.mean(dim=1)     # B, 768
+        x = self.head(x)      # B, 1000
         return x
 
 
@@ -321,5 +340,4 @@ class PatchMerging(nn.Module):
 if __name__ == '__main__':
     img = torch.randn([2, 3, 224, 224])
     model = SwinTransformer()
-    print(model)
     print(model(img).size())
