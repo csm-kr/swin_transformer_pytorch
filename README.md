@@ -31,8 +31,8 @@ https://github.com/berniwal/swin-transformer-pytorch
 
 ## Experiments
 
--[ ] imagenet
--[ ] data augmentation 
--[ ] various models (tiny, base, large, ...)  
+- [ ] imagenet
+- [ ] data augmentation 
+- [ ] various models (tiny, base, large, ...)  
 
 
