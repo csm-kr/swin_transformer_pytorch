@@ -182,7 +182,8 @@ class SW_MSA(nn.Module):
         attn = (q @ k.transpose(-2, -1))
 
         num_win = self.attn_mask.shape[0]
-        attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.unsqueeze(1).unsqueeze(0)
+        attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.to(torch.get_device(q)).\
+            unsqueeze(1).unsqueeze(0)
         attn = attn.view(-1, self.num_heads, N, N)
 
         attn = self.softmax(attn)
@@ -303,6 +304,11 @@ class PatchMerging(nn.Module):
         x = x.view(-1, new_h * new_w, c * self.downscaling_factor ** 2)
         x = self.linear(x)
         return x
+
+
+def build_model(opts):
+    model = SwinTransformer()
+    return model
 
 
 if __name__ == '__main__':
