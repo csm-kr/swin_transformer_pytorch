@@ -307,7 +307,8 @@ class PatchMerging(nn.Module):
 
 if __name__ == '__main__':
     img = torch.randn([2, 3, 224, 224])
-    model = SwinTransformer()  # 28249588(git) vs 28288354(ms) / 37755 / vs 28261000(my) (507 + 37248)
+    model = SwinTransformer()  # 28288354(ms) / 37755 / vs 28261000(my) / (507 + 37248)
+                               # diff           27354
     print("SwinTransformer : ", sum(p.numel() for p in model.parameters() if p.requires_grad))
     print(model(img).size())
 
