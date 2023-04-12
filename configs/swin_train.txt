@@ -1,0 +1,18 @@
+# train
+name = swin_train
+
+# data
+data_root = /home/cvmlserver7/Sungmin/data/imagenet
+vit_data_augmentation_true
+data_type = imagenet
+
+# model
+
+# train
+lr = 0.001
+epoch = 300
+batch_size = 512
+
+# distributed
+rank = 0
+gpu_ids = [0, 1, 2, 3]
