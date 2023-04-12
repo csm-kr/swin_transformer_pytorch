@@ -47,6 +47,12 @@ An analysis of the thesis can be seen in the following. (https://csm-kr.tistory.
 |---------|------------|------------|----------|----------|----------|------------------|
 | SWIN(T) | 512        | 224 x 224  | -        | -        | -        | 28261000 (28.3M) |
 
+learning...
+
+![model](./figure/comparison.png)
+
+It seems better than VIT at imagenet1k classification 
+
 ## Start Guide
 
 - Train
