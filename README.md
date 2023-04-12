@@ -49,9 +49,9 @@ An analysis of the thesis can be seen in the following. (https://csm-kr.tistory.
 
 learning...
 
-![model](./figure/comparison.png)
+![comparison](./figure/comparison.PNG)
 
-It seems better than VIT at imagenet1k classification 
+It seems better than VIT at imagenet 1k classification 
 
 ## Start Guide
 
