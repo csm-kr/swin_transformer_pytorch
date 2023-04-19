@@ -221,10 +221,11 @@ class SW_MSA(nn.Module):
         attn = attn + self._get_rel_pos_bias()
 
         num_win = self.attn_mask.shape[0]
-        # attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.to(torch.get_device(q)).\
-        #     unsqueeze(1).unsqueeze(0)
-        # for cpu
-        attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.unsqueeze(1).unsqueeze(0)
+        if torch.get_device(q) < 0:
+            attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.unsqueeze(1).unsqueeze(0)
+        else:
+            attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.to(torch.get_device(q)).\
+                unsqueeze(1).unsqueeze(0)
         attn = attn.view(-1, self.num_heads, N, N)
 
         attn = self.softmax(attn)
