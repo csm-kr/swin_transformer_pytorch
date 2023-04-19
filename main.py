@@ -59,7 +59,7 @@ def main_worker(rank, opts):
         cycle_mult=1.,
         max_lr=opts.lr,
         min_lr=5e-6,
-        warmup_steps=20,
+        warmup_steps=int(20 * len(train_loader)),
         )
 
     # 9. ** logger **
