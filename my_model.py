@@ -1,6 +1,19 @@
 import math
 import torch
 import torch.nn as nn
+from timm.models.layers import trunc_normal_
+
+
+def get_relative_position_index(win_h, win_w):
+    # get pair-wise relative position index for each token inside the window
+    coords = torch.stack(torch.meshgrid([torch.arange(win_h), torch.arange(win_w)]))  # 2, Wh, Ww
+    coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
+    relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
+    relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
+    relative_coords[:, :, 0] += win_h - 1  # shift to start from 0
+    relative_coords[:, :, 1] += win_w - 1
+    relative_coords[:, :, 0] *= 2 * win_w - 1
+    return relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
 
 
 class PatchPartition(nn.Module):
@@ -55,11 +68,23 @@ class W_MSA(nn.Module):
         attn_dim = head_dim * num_heads
         self.scale = head_dim ** -0.5
 
+        # define a parameter table of relative position bias, shape: 2*Wh-1 * 2*Ww-1, nH
+        self.relative_position_bias_table = nn.Parameter(torch.zeros((2 * 7 - 1) * (2 * 7 - 1), num_heads))
+        # get pair-wise relative position index for each token inside the window
+        self.register_buffer("relative_position_index", get_relative_position_index(7, 7))
+        trunc_normal_(self.relative_position_bias_table, std=.02)
+
         self.qkv = nn.Linear(dim, attn_dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(attn_dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         self.softmax = nn.Softmax(dim=-1)
+
+    def _get_rel_pos_bias(self) -> torch.Tensor:
+        relative_position_bias = self.relative_position_bias_table[
+            self.relative_position_index.view(-1)].view(49, 49, -1)  # Wh*Ww,Wh*Ww,nH
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        return relative_position_bias.unsqueeze(0)
 
     def forward(self, x):
         # setting
@@ -83,6 +108,7 @@ class W_MSA(nn.Module):
 
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
+        attn = attn + self._get_rel_pos_bias()
 
         attn = self.softmax(attn)
         attn = self.attn_drop(attn)
@@ -97,7 +123,6 @@ class W_MSA(nn.Module):
         x = x.view(B, h, w, -1)               # (roll)  [B, 56, 56, 96]
         x = x.view(B, h * w, C)                       # [B, 56, 56, 96]
         return x
-
 
 
 def window_partition(x, window_size: int):
@@ -131,6 +156,12 @@ class SW_MSA(nn.Module):
         attn_dim = head_dim * num_heads
         self.scale = head_dim ** -0.5
 
+        # define a parameter table of relative position bias, shape: 2*Wh-1 * 2*Ww-1, nH
+        self.relative_position_bias_table = nn.Parameter(torch.zeros((2 * 7 - 1) * (2 * 7 - 1), num_heads))
+        # get pair-wise relative position index for each token inside the window
+        self.register_buffer("relative_position_index", get_relative_position_index(7, 7))
+        trunc_normal_(self.relative_position_bias_table, std=.02)
+
         self.qkv = nn.Linear(dim, attn_dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(attn_dim, dim)
@@ -157,6 +188,13 @@ class SW_MSA(nn.Module):
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
         self.attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
+    def _get_rel_pos_bias(self) -> torch.Tensor:
+        relative_position_bias = self.relative_position_bias_table[
+            self.relative_position_index.view(-1)].view(49, 49, -1)  # Wh*Ww,Wh*Ww,nH
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        return relative_position_bias.unsqueeze(0)
+
+
     def forward(self, x):
         # setting
         B, L, C = x.shape
@@ -180,10 +218,13 @@ class SW_MSA(nn.Module):
 
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
+        attn = attn + self._get_rel_pos_bias()
 
         num_win = self.attn_mask.shape[0]
-        attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.to(torch.get_device(q)).\
-            unsqueeze(1).unsqueeze(0)
+        # attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.to(torch.get_device(q)).\
+        #     unsqueeze(1).unsqueeze(0)
+        # for cpu
+        attn = attn.view(B_ // num_win, num_win, self.num_heads, N, N) + self.attn_mask.unsqueeze(1).unsqueeze(0)
         attn = attn.view(-1, self.num_heads, N, N)
 
         attn = self.softmax(attn)
@@ -293,7 +334,8 @@ class PatchMerging(nn.Module):
         self.input_resolution = input_resolution
         self.downscaling_factor = downscaling_factor
         self.patch_merge = nn.Unfold(kernel_size=downscaling_factor, stride=downscaling_factor, padding=0)
-        self.linear = nn.Linear(in_channels * downscaling_factor ** 2, out_channels)
+        self.norm = nn.LayerNorm(in_channels * downscaling_factor ** 2)
+        self.linear = nn.Linear(in_channels * downscaling_factor ** 2, out_channels, bias=False)
 
     def forward(self, x):
         b, l, c = x.shape
@@ -302,6 +344,7 @@ class PatchMerging(nn.Module):
         new_h, new_w = h // self.downscaling_factor, w // self.downscaling_factor
         x = self.patch_merge(x).view(b, -1, new_h, new_w).permute(0, 2, 3, 1)
         x = x.view(-1, new_h * new_w, c * self.downscaling_factor ** 2)
+        x = self.norm(x)
         x = self.linear(x)
         return x
 
@@ -313,8 +356,8 @@ def build_model(opts):
 
 if __name__ == '__main__':
     img = torch.randn([2, 3, 224, 224])
-    model = SwinTransformer()  # 28288354(ms) / 37755 / vs 28261000(my) / (507 + 37248)
-                               # diff           27354
+    model = SwinTransformer()  # 28288354(timm) == 28288354(my)
     print("SwinTransformer : ", sum(p.numel() for p in model.parameters() if p.requires_grad))
+    # print(model)
     print(model(img).size())
 
