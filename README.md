@@ -46,7 +46,7 @@ An analysis of the thesis can be seen in the following. (https://csm-kr.tistory.
 
 | Model   | Batch size | Resolution | Top1-Acc | Top5-Acc | Val Loss | Params           |
 |---------|------------|------------|----------|----------|----------|------------------|
-| SWIN(T) | 512        | 224 x 224  | -        | -        | -        | 28261000 (28.3M) |
+| SWIN(T) | 512        | 224 x 224  | -        | -        | -        | 28288354 (28.3M) |
 
 learning...
 
